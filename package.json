@@ -1,21 +1,24 @@
 {
-  "name": "@betit/rollup-plugin-rename-extensions",
-  "version": "0.1.0",
+  "name": "@vdustr/rollup-plugin-rename-extensions",
+  "version": "0.1.1",
   "description": "Plugin to rename file extensions before they're emitted in rollup",
   "main": "dist/index.js",
-  "homepage": "https://github.com/GiG/rollup-plugin-rename-extensions",
+  "homepage": "https://github.com/VdustR/rollup-plugin-rename-extensions",
   "bugs": {
-    "url": "https://github.com/GiG/rollup-plugin-rename-extensions/issues"
+    "url": "https://github.com/VdustR/rollup-plugin-rename-extensionso/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/GiG/rollup-plugin-rename-extensions.git"
+    "url": "https://github.com/VdustR/rollup-plugin-rename-extensions.git"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc"
   },
-  "author": "Thomas Caserta <thomas.caserta@gig.com>",
+  "author": {
+    "name": "ViPro",
+    "email": "VdustR@gmail.com",
+    "url": "https://VdustR.github.io"
+  },
   "license": "MIT",
   "dependencies": {
     "@babel/parser": "^7.6.2",

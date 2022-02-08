@@ -1,208 +1,238 @@
-import { Plugin } from 'rollup';
-import { createFilter } from 'rollup-pluginutils';
-import MagicString from 'magic-string';
-import { extname } from 'path';
-
 // Parsing
-import { parse, ParserPlugin } from '@babel/parser';
-import traverse, { NodePath } from '@babel/traverse';
-import { Node, ImportDeclaration, CallExpression, ExportNamedDeclaration, ExportAllDeclaration, StringLiteral } from '@babel/types';
+import { parse, ParserPlugin } from "@babel/parser";
+import traverse, { NodePath } from "@babel/traverse";
+import {
+  CallExpression,
+  ExportAllDeclaration,
+  ExportNamedDeclaration,
+  ImportDeclaration,
+  Node,
+  StringLiteral,
+} from "@babel/types";
+import MagicString from "magic-string";
+import { extname } from "path";
+import { Plugin } from "rollup";
+import { createFilter } from "rollup-pluginutils";
 
 enum NodeType {
-    Literal = 'StringLiteral',
-    CallExpresssion = 'CallExpression',
-    Identifier = 'Identifier',
-    ImportDeclaration = 'ImportDeclaration',
-    ExportNamedDeclaration = 'ExportNamedDeclaration',
-    ExportAllDeclaration = 'ExportAllDeclaration',
+  Literal = "StringLiteral",
+  CallExpresssion = "CallExpression",
+  Identifier = "Identifier",
+  ImportDeclaration = "ImportDeclaration",
+  ExportNamedDeclaration = "ExportNamedDeclaration",
+  ExportAllDeclaration = "ExportAllDeclaration",
 }
 
 const defaultPlugins: ParserPlugin[] = [
-    'dynamicImport',
-    'classProperties',
-    'objectRestSpread',
+  "dynamicImport",
+  "classProperties",
+  "objectRestSpread",
 ];
 
 export interface IRenameExtensionsOptions {
-    /**
-     * Files to include for potential renames.
-     * Also denotes files of which may import a renamed module in
-     * order to update their imports.
-     */
-    include?: Array<string | RegExp> | string | RegExp | null;
+  /**
+   * Files to include for potential renames.
+   * Also denotes files of which may import a renamed module in
+   * order to update their imports.
+   */
+  include?: Array<string | RegExp> | string | RegExp | null;
 
-    /**
-     * Files to explicitly exclude
-     */
-    exclude?: Array<string | RegExp> | string | RegExp | null;
+  /**
+   * Files to explicitly exclude
+   */
+  exclude?: Array<string | RegExp> | string | RegExp | null;
 
-    /**
-     * Generate source maps for the transformations.
-     */
-    sourceMap?: boolean;
+  /**
+   * Strictly equaled string or regular expression to match.
+   * The `exclude` option doesn't effect this option.
+   * It's for virtual bundles mainly. For example: "\0tslib.js"
+   */
+  match?: Array<string | RegExp> | string | RegExp | null;
 
-    /**
-     * Babel plugins to use for parsing. Defaults to:
-     * `dynamicImport`, `classProperties`, `objectRestSpread`
-     *
-     * For a full list visit https://babeljs.io/docs/en/babel-parser#plugins
-     */
-    parserPlugins?: ParserPlugin[];
+  /**
+   * Generate source maps for the transformations.
+   */
+  sourceMap?: boolean;
 
-    /**
-     * Object describing the transformations to use.
-     * IE. Input Extension => Output Extensions.
-     * Extensions should include the dot for both input and output.
-     */
-    mappings: Record<string, string>;
+  /**
+   * Babel plugins to use for parsing. Defaults to:
+   * `dynamicImport`, `classProperties`, `objectRestSpread`
+   *
+   * For a full list visit https://babeljs.io/docs/en/babel-parser#plugins
+   */
+  parserPlugins?: ParserPlugin[];
+
+  /**
+   * Object describing the transformations to use.
+   * IE. Input Extension => Output Extensions.
+   * Extensions should include the dot for both input and output.
+   */
+  mappings: Record<string, string>;
 }
 
 function isEmpty(array: any[] | undefined) {
-    return !array || array.length === 0;
+  return !array || array.length === 0;
 }
 
-function isLiteral(node: CallExpression['arguments'][0] | undefined | null): node is StringLiteral {
-    return !!node && node.type === NodeType.Literal;
+function isLiteral(
+  node: CallExpression["arguments"][0] | undefined | null
+): node is StringLiteral {
+  return !!node && node.type === NodeType.Literal;
 }
 
 export function getRequireSource(node: CallExpression): StringLiteral | false {
-    if (isEmpty(node.arguments)) {
-        return false;
-    }
+  if (isEmpty(node.arguments)) {
+    return false;
+  }
 
-    const args = node.arguments;
-    const firstArg = args[0];
+  const args = node.arguments;
+  const firstArg = args[0];
 
-    if (!isLiteral(firstArg)) {
-        return false;
-    }
+  if (!isLiteral(firstArg)) {
+    return false;
+  }
 
-    const isRequire = node.callee.type === 'Identifier' && node.callee.name === 'require';
+  const isRequire =
+    node.callee.type === "Identifier" && node.callee.name === "require";
 
-    if (node.callee.type === 'Import' || isRequire) {
-        return firstArg;
-    }
-
+  if (node.callee.type === "Import" || isRequire) {
     return firstArg;
+  }
+
+  return firstArg;
 }
 
 function getImportSource(node: ImportDeclaration): StringLiteral | false {
-    if (node.type === NodeType.ImportDeclaration) {
-        return node.source;
-    }
+  if (node.type === NodeType.ImportDeclaration) {
+    return node.source;
+  }
 
-    return false;
+  return false;
 }
 
-function getExportSource(node: ExportAllDeclaration | ExportNamedDeclaration): StringLiteral | false {
-    if (!node.source || node.source.type !== NodeType.Literal) {
-        return false;
-    }
+function getExportSource(
+  node: ExportAllDeclaration | ExportNamedDeclaration
+): StringLiteral | false {
+  if (!node.source || node.source.type !== NodeType.Literal) {
+    return false;
+  }
 
-    return node.source;
+  return node.source;
 }
 
 function rewrite(
-    input: string,
-    extensions: Record<string, string>,
+  input: string,
+  extensions: Record<string, string>
 ): string | false {
-    const extension = extname(input);
+  const extension = extname(input);
 
-    if (extensions.hasOwnProperty(extension)) {
-        return `${input.slice(0, -extension.length)}${extensions[extension]}`;
-    }
+  if (extensions.hasOwnProperty(extension)) {
+    return `${input.slice(0, -extension.length)}${extensions[extension]}`;
+  }
 
-    return false;
+  return false;
 }
 
 export default function renameExtensions(
-    options: IRenameExtensionsOptions,
+  options: IRenameExtensionsOptions
 ): Plugin {
-    const filter = createFilter(options.include, options.exclude);
-    const sourceMaps = options.sourceMap !== false;
-    return {
-        name: 'rename-rollup',
-        generateBundle(_, bundle) {
-            const files = Object.entries<any>(bundle);
+  const filter = createFilter(options.include, options.exclude);
+  function match(input: string): boolean {
+    function match(input: string, rule: string | RegExp): boolean {
+      if (typeof rule === "string") {
+        return input === rule;
+      }
 
-            for (const [key, file] of files) {
-                if (!filter(file.facadeModuleId)) {
-                    continue;
-                }
+      return Boolean(input.match(rule));
+    }
+    const rule = options.match;
+    if (!rule) return false;
+    if (Array.isArray(rule)) {
+      return rule.some((rule) => match(input, rule));
+    }
+    return match(input, rule);
+  }
+  const sourceMaps = options.sourceMap !== false;
+  return {
+    name: "rename-rollup",
+    generateBundle(_, bundle) {
+      const files = Object.entries<any>(bundle);
 
-                file.facadeModuleId =
-                    rewrite(file.facadeModuleId, options.mappings) ||
-                    file.facadeModuleId;
-                file.fileName =
-                    rewrite(file.fileName, options.mappings) || file.fileName;
-                file.imports.map((imported: string) => {
-                    if (!filter(imported)) {
-                        return imported;
-                    }
+      for (const [key, file] of files) {
+        if (!filter(file.facadeModuleId) && !match(file.facadeModuleId)) {
+          continue;
+        }
 
-                    return rewrite(imported, options.mappings) || imported;
-                });
+        file.facadeModuleId =
+          rewrite(file.facadeModuleId, options.mappings) || file.facadeModuleId;
+        file.fileName =
+          rewrite(file.fileName, options.mappings) || file.fileName;
+        file.imports.map((imported: string) => {
+          if (!filter(imported)) {
+            return imported;
+          }
 
-                if (file.code) {
-                    const magicString = new MagicString(file.code);
-                    const ast = parse(file.code, {
-                        sourceType: 'module',
-                        plugins: options.parserPlugins || defaultPlugins,
-                    });
+          return rewrite(imported, options.mappings) || imported;
+        });
 
-                    const extract = (path: NodePath<Node>) => {
-                        let req: StringLiteral | false = false;
-                        if (path.isImportDeclaration()) {
-                            req = getImportSource(path.node);
-                        }
+        if (file.code) {
+          const magicString = new MagicString(file.code);
+          const ast = parse(file.code, {
+            sourceType: "module",
+            plugins: options.parserPlugins || defaultPlugins,
+          });
 
-                        if (path.isCallExpression()) {
-                            req = getRequireSource(path.node);
-                        }
-
-                        if (path.isExportAllDeclaration() || path.isExportNamedDeclaration()) {
-                            req = getExportSource(path.node);
-                        }
-
-                        if (req) {
-                            const { start, end } = req;
-
-                            if (!start || !end) {
-                                throw new Error('Error occurred when trying to get the start and end positions of imports.');
-                            }
-
-                            const newPath = rewrite(
-                                req.value,
-                                options.mappings,
-                            );
-
-                            if (newPath) {
-                                magicString.overwrite(
-                                    start,
-                                    end,
-                                    `'${newPath}'`,
-                                );
-                            }
-                        }
-                    };
-
-                    traverse(ast, {
-                        ImportDeclaration: extract,
-                        CallExpression: extract,
-                        ExportAllDeclaration: extract,
-                        ExportNamedDeclaration: extract,
-                    });
-
-                    if (sourceMaps) {
-                        file.map = magicString.generateMap();
-                    }
-
-                    file.code = magicString.toString();
-                }
-
-                delete bundle[key];
-                bundle[rewrite(key, options.mappings) || key] = file;
+          const extract = (path: NodePath<Node>) => {
+            let req: StringLiteral | false = false;
+            if (path.isImportDeclaration()) {
+              req = getImportSource(path.node);
             }
-        },
-    };
+
+            if (path.isCallExpression()) {
+              req = getRequireSource(path.node);
+            }
+
+            if (
+              path.isExportAllDeclaration() ||
+              path.isExportNamedDeclaration()
+            ) {
+              req = getExportSource(path.node);
+            }
+
+            if (req) {
+              const { start, end } = req;
+
+              if (!start || !end) {
+                throw new Error(
+                  "Error occurred when trying to get the start and end positions of imports."
+                );
+              }
+
+              const newPath = rewrite(req.value, options.mappings);
+
+              if (newPath) {
+                magicString.overwrite(start, end, `'${newPath}'`);
+              }
+            }
+          };
+
+          traverse(ast, {
+            ImportDeclaration: extract,
+            CallExpression: extract,
+            ExportAllDeclaration: extract,
+            ExportNamedDeclaration: extract,
+          });
+
+          if (sourceMaps) {
+            file.map = magicString.generateMap();
+          }
+
+          file.code = magicString.toString();
+        }
+
+        delete bundle[key];
+        bundle[rewrite(key, options.mappings) || key] = file;
+      }
+    },
+  };
 }
